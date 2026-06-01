@@ -1,0 +1,210 @@
+const express = require('express');
+const router = express.Router();
+const { generateEmail, generateSMS } = require('../services/claude');
+const { sendEmail } = require('../services/sendgrid');
+const { sendSMS } = require('../services/twilio');
+const { createClient } = require('@supabase/supabase-js');
+
+const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_ANON_KEY);
+
+const DEFAULT_LIMITS = { daily_email_limit: 100, daily_sms_limit: 100 };
+
+const checkDailyLimit = async (type) => {
+  const { data: settings } = await supabase.from('settings').select('*').single();
+  const limit = type === 'email'
+    ? (settings?.daily_email_limit ?? DEFAULT_LIMITS.daily_email_limit)
+    : (settings?.daily_sms_limit ?? DEFAULT_LIMITS.daily_sms_limit);
+
+  const today = new Date().toISOString().split('T')[0];
+  const { count, error } = await supabase
+    .from('outreach_log')
+    .select('*', { count: 'exact', head: true })
+    .eq('type', type)
+    .gte('sent_at', today);
+
+  if (error) throw error;
+  return (count ?? 0) < limit;
+};
+
+router.post('/send/:leadId', async (req, res) => {
+  const { leadId } = req.params;
+  const { type } = req.body;
+
+  try {
+    const { data: lead, error: leadError } = await supabase
+      .from('leads')
+      .select('*')
+      .eq('id', leadId)
+      .single();
+
+    if (leadError || !lead) {
+      return res.status(404).json({ error: 'Lead not found' });
+    }
+
+    if ((type === 'email' || type === 'both') && !lead.email) {
+      return res.status(400).json({ error: 'This lead has no email address.' });
+    }
+
+    if ((type === 'sms' || type === 'both') && !lead.phone) {
+      return res.status(400).json({ error: 'This lead has no phone number.' });
+    }
+
+    const results = {};
+
+    if ((type === 'email' || type === 'both') && lead.email) {
+      const allowed = await checkDailyLimit('email');
+      if (!allowed) return res.status(429).json({ error: 'Daily email limit reached' });
+
+      const emailContent = await generateEmail(lead);
+      const subject = emailContent.match(/Subject: (.+)/)?.[1] || 'Professional Website for Your Business';
+      const body = emailContent.replace(/Subject: .+\n/, '');
+      await sendEmail(lead.email, subject, body);
+      await supabase.from('outreach_log').insert({
+        lead_id: leadId,
+        type: 'email',
+        message: emailContent,
+        status: 'sent',
+      });
+      results.email = 'sent';
+    }
+
+    if ((type === 'sms' || type === 'both') && lead.phone) {
+      const allowed = await checkDailyLimit('sms');
+      if (!allowed) return res.status(429).json({ error: 'Daily SMS limit reached' });
+
+      const smsContent = await generateSMS(lead);
+      const twilioResult = await sendSMS(lead.phone, smsContent);
+      await supabase.from('outreach_log').insert({
+        lead_id: leadId,
+        type: 'sms',
+        message: smsContent,
+        status: twilioResult.status === 'failed' ? 'failed' : 'sent',
+      });
+      results.sms = 'sent';
+      results.twilioSid = twilioResult.sid;
+      results.twilioStatus = twilioResult.status;
+    }
+
+    if (!Object.keys(results).length) {
+      return res.status(400).json({ error: 'Nothing was sent. Check lead contact info and request type.' });
+    }
+
+    await supabase.from('leads').update({ status: 'contacted' }).eq('id', leadId);
+    res.json({ success: true, results });
+  } catch (err) {
+    let message = err.message || 'Failed to send outreach';
+    if (message.includes('not_found_error') || message.includes('model:')) {
+      message = 'Claude AI model error. Restart the backend server (npm run dev) and try again.';
+    }
+    console.error('Outreach send error:', message);
+    res.status(500).json({ error: message });
+  }
+});
+
+router.get('/log', async (req, res) => {
+  const { data, error } = await supabase
+    .from('outreach_log')
+    .select('*, leads(business_name, city)')
+    .order('sent_at', { ascending: false })
+    .limit(100);
+  if (error) return res.status(500).json({ error: error.message });
+  res.json(data);
+});
+
+router.post('/bulk', async (req, res) => {
+  const { type, city, businessType } = req.body;
+
+  if (!type || !['email', 'sms'].includes(type)) {
+    return res.status(400).json({ error: 'Invalid outreach type' });
+  }
+
+  let query = supabase.from('leads').select('*').eq('status', 'new');
+
+  if (type === 'email') {
+    query = query.not('email', 'is', null).neq('email', '');
+  } else {
+    query = query.not('phone', 'is', null).neq('phone', '');
+  }
+
+  if (city?.trim()) {
+    query = query.ilike('city', `%${city.trim()}%`);
+  }
+  if (businessType?.trim()) {
+    query = query.ilike('business_type', `%${businessType.trim()}%`);
+  }
+
+  const { data: leads, error } = await query.limit(50);
+  if (error) return res.status(500).json({ error: error.message });
+
+  if (!leads?.length) {
+    return res.json({
+      success: true,
+      results: [],
+      sent: 0,
+      failed: 0,
+      message: `No new leads found with ${type === 'email' ? 'email addresses' : 'phone numbers'} matching your filters.`,
+    });
+  }
+
+  const results = [];
+  let sent = 0;
+  let failed = 0;
+
+  for (const lead of leads) {
+    try {
+      if (type === 'email') {
+        const allowed = await checkDailyLimit('email');
+        if (!allowed) {
+          results.push({ id: lead.id, business_name: lead.business_name, status: 'limit_reached' });
+          break;
+        }
+
+        const emailContent = await generateEmail(lead);
+        const subject = emailContent.match(/Subject: (.+)/)?.[1] || 'Professional Website for Your Business';
+        const body = emailContent.replace(/Subject: .+\n?/, '').trim();
+        await sendEmail(lead.email, subject, body);
+        await supabase.from('outreach_log').insert({
+          lead_id: lead.id,
+          type: 'email',
+          message: emailContent,
+          status: 'sent',
+        });
+        await supabase.from('leads').update({ status: 'contacted' }).eq('id', lead.id);
+        results.push({ id: lead.id, business_name: lead.business_name, status: 'sent' });
+        sent += 1;
+      }
+
+      if (type === 'sms') {
+        const allowed = await checkDailyLimit('sms');
+        if (!allowed) {
+          results.push({ id: lead.id, business_name: lead.business_name, status: 'limit_reached' });
+          break;
+        }
+
+        const smsContent = await generateSMS(lead);
+        const twilioResult = await sendSMS(lead.phone, smsContent);
+        await supabase.from('outreach_log').insert({
+          lead_id: lead.id,
+          type: 'sms',
+          message: smsContent,
+          status: twilioResult.status === 'failed' ? 'failed' : 'sent',
+        });
+        await supabase.from('leads').update({ status: 'contacted' }).eq('id', lead.id);
+        results.push({ id: lead.id, business_name: lead.business_name, status: 'sent' });
+        sent += 1;
+      }
+    } catch (err) {
+      results.push({
+        id: lead.id,
+        business_name: lead.business_name,
+        status: 'failed',
+        error: err.message,
+      });
+      failed += 1;
+    }
+  }
+
+  res.json({ success: true, results, sent, failed });
+});
+
+module.exports = router;
