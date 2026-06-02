@@ -1,4 +1,5 @@
 const express = require('express');
+const multer = require('multer');
 const router = express.Router();
 const { generateEmail, generateSMS } = require('../services/claude');
 const { sendEmail } = require('../services/sendgrid');
@@ -6,6 +7,13 @@ const { sendSMS } = require('../services/twilio');
 const { createClient } = require('@supabase/supabase-js');
 
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_ANON_KEY);
+const upload = multer();
+
+const parseEmailAddress = (raw) => {
+  if (!raw) return null;
+  const match = String(raw).match(/<([^>]+)>/);
+  return (match ? match[1] : raw).trim().toLowerCase();
+};
 
 // Get all inbox messages
 router.get('/', async (req, res) => {
@@ -17,25 +25,65 @@ router.get('/', async (req, res) => {
   res.json(data);
 });
 
-// Catch incoming email reply (SendGrid Inbound Parse webhook)
-router.post('/webhook/email', async (req, res) => {
-  const { from, text } = req.body;
-  const { data: lead } = await supabase.from('leads').select('*').eq('email', from).single();
-  let aiReply = null;
-  if (lead) {
-    aiReply = await generateEmail({ ...lead, context: `They replied: "${text}". Write a friendly follow up to close the deal.` });
+// Catch incoming email reply (SendGrid Inbound Parse webhook — multipart form POST)
+router.post('/webhook/email', upload.none(), async (req, res) => {
+  try {
+    const fromRaw = req.body.from || '';
+    const text = req.body.text || req.body.html || '';
+    const subject = req.body.subject || '(no subject)';
+    const fromEmail = parseEmailAddress(fromRaw);
+
+    if (!fromEmail) {
+      console.warn('Inbound email webhook: missing from address', req.body);
+      return res.sendStatus(200);
+    }
+
+    console.log('Inbound email received:', { from: fromEmail, subject });
+
+    const { data: lead } = await supabase
+      .from('leads')
+      .select('*')
+      .ilike('email', fromEmail)
+      .maybeSingle();
+
+    let aiReply = null;
+    if (lead) {
+      aiReply = await generateEmail({
+        ...lead,
+        context: `They replied: "${text}". Write a friendly follow up to close the deal.`,
+      });
+    }
+
+    await supabase.from('inbox').insert({
+      lead_id: lead?.id || null,
+      type: 'email',
+      from_name: lead?.business_name || fromRaw.replace(/<[^>]+>/, '').trim() || fromEmail,
+      from_contact: fromEmail,
+      message: text,
+      status: 'unread',
+      ai_suggested_reply: aiReply,
+    });
+
+    if (lead) {
+      await supabase.from('leads').update({ status: 'responded' }).eq('id', lead.id);
+    }
+
+    const forwardTo = process.env.INBOX_FORWARD_TO?.trim();
+    if (forwardTo) {
+      try {
+        await sendEmail(
+          forwardTo,
+          `Fwd: ${subject}`,
+          `From: ${fromRaw}\nSubject: ${subject}\n\n${text}`
+        );
+      } catch (forwardErr) {
+        console.warn('Inbox forward to Gmail failed:', forwardErr.message);
+      }
+    }
+
+    res.sendStatus(200);
+    res.sendStatus(500);
   }
-  await supabase.from('inbox').insert({
-    lead_id: lead?.id || null,
-    type: 'email',
-    from_name: lead?.business_name || from,
-    from_contact: from,
-    message: text,
-    status: 'unread',
-    ai_suggested_reply: aiReply
-  });
-  if (lead) await supabase.from('leads').update({ status: 'responded' }).eq('id', lead.id);
-  res.sendStatus(200);
 });
 
 // Catch incoming SMS reply (Twilio webhook)

@@ -1,10 +1,13 @@
 const sgMail = require('@sendgrid/mail');
 
 const getFromEmail = () =>
-  process.env.SENDGRID_FROM_EMAIL || 'reed.smalling@gmail.com';
+  process.env.SENDGRID_FROM_EMAIL || 'reed@monroewebdesign.org';
 
 const getFromName = (override) =>
-  override || process.env.SENDGRID_FROM_NAME || 'Your Web Design Co';
+  override || process.env.SENDGRID_FROM_NAME || 'Monroe Web Design';
+
+const getReplyToEmail = () =>
+  process.env.SENDGRID_REPLY_TO || getFromEmail();
 
 const parseSendGridError = (err) => {
   const sgErrors = err.response?.body?.errors;
@@ -20,8 +23,8 @@ const formatSendGridError = (details) => {
   if (/verified Sender Identity|not authorized to send from that email/i.test(details)) {
     return (
       `SendGrid rejected the sender address "${fromEmail}". ` +
-      'In SendGrid go to Settings → Sender Authentication → verify that exact email as a Single Sender, ' +
-      'then set SENDGRID_FROM_EMAIL on Render to match. ' +
+      'In SendGrid go to Settings → Sender Authentication → authenticate monroewebdesign.org, ' +
+      'then set SENDGRID_FROM_EMAIL=reed@monroewebdesign.org on Render. ' +
       `(SendGrid: ${details})`
     );
   }
@@ -67,6 +70,7 @@ const sendEmail = async (to, subject, body, fromName) => {
   const msg = {
     to,
     from: { email: fromEmail, name: getFromName(fromName) },
+    replyTo: { email: getReplyToEmail(), name: getFromName(fromName) },
     subject,
     text: body,
     html: body.replace(/\n/g, '<br>'),

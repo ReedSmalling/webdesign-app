@@ -1,0 +1,104 @@
+MONROEWEBDESIGN.ORG — EMAIL SETUP (Namecheap + SendGrid + Render)
+================================================================
+
+Your app backend:  https://webdesign-app.onrender.com
+Inbound webhook:   https://webdesign-app.onrender.com/api/inbox/webhook/email
+
+Do these in order. DNS can take 15 minutes to 48 hours to propagate.
+
+
+PART 1 — SENDGRID DOMAIN AUTH (send from reed@monroewebdesign.org)
+------------------------------------------------------------------
+
+1. Go to:  https://app.sendgrid.com/settings/sender_auth/domains
+2. Click  Authenticate Your Domain
+3. DNS host:  Namecheap
+4. Domain:  monroewebdesign.org
+5. SendGrid shows CNAME records (usually 3). Copy each one.
+
+6. Namecheap:
+   - https://ap.www.namecheap.com/domains/domaincontrolpanel/monroewebdesign.org/advancedns
+   - Advanced DNS tab
+   - For EACH CNAME SendGrid gave you, click  Add New Record:
+       Type: CNAME Record
+       Host: (what SendGrid shows, e.g. em1234 or s1._domainkey)
+       Value: (what SendGrid shows)
+       TTL: Automatic
+   - Save all records
+
+7. Back in SendGrid, click  Verify
+
+8. Render env vars (Environment → Edit → add/update):
+   SENDGRID_FROM_EMAIL=reed@monroewebdesign.org
+   SENDGRID_FROM_NAME=Monroe Web Design
+   INBOX_FORWARD_TO=reed.smalling@gmail.com
+
+9. Render → Manual Deploy → Deploy latest commit
+
+
+PART 2 — SENDGRID INBOUND PARSE (replies → app Inbox)
+-----------------------------------------------------
+
+IMPORTANT: This uses an MX record on your domain. It replaces Namecheap
+email forwarding for @monroewebdesign.org (the app forwards copies to
+Gmail for you via INBOX_FORWARD_TO).
+
+1. Go to:  https://app.sendgrid.com/settings/parse
+2. Click  Add Host & URL
+3. Fill in:
+   Subdomain:  (leave blank for root domain, OR use "mail" for mail.monroewebdesign.org)
+   Domain:  monroewebdesign.org
+   Destination URL:
+     https://webdesign-app.onrender.com/api/inbox/webhook/email
+   Check:  POST the raw, full MIME message  →  OFF (unchecked)
+   Check:  Spam Check  →  ON (optional)
+4. Click  Add
+
+5. SendGrid shows an MX record. Add it in Namecheap Advanced DNS:
+   Type: MX Record
+   Host: @   (or "mail" if you used subdomain mail.monroewebdesign.org)
+   Mail server: mx.sendgrid.net
+   Priority: 10
+   TTL: Automatic
+
+6. Wait for DNS (up to 48 hrs, often 1–2 hrs)
+
+7. Test: send an email TO reed@monroewebdesign.org from another account.
+   - Should appear in app  Inbox  page
+   - Copy should forward to reed.smalling@gmail.com
+
+
+PART 3 — EMAIL FORWARDING (reed@ → Gmail)
+-----------------------------------------
+
+Option A (recommended with Inbound Parse):
+  Already handled! Set on Render:
+  INBOX_FORWARD_TO=reed.smalling@gmail.com
+  When mail hits reed@monroewebdesign.org, the app saves it to Inbox
+  AND forwards a copy to your Gmail.
+
+Option B (Namecheap only — do NOT use if you did Part 2 MX record):
+  Namecheap → Domain List → Manage → Redirect Email
+  Add forward: reed@monroewebdesign.org → reed.smalling@gmail.com
+
+
+PART 4 — UPDATE RENDER ENV (paste full list)
+--------------------------------------------
+
+1. Open:  server\render-env-paste.txt  in Cursor
+2. Copy all (Ctrl+A, Ctrl+C)
+3. Render → webdesign-app → Environment → Raw Editor → Paste → Save
+4. Manual Deploy → Deploy latest commit
+
+
+PART 5 — TEST EVERYTHING
+------------------------
+
+1. Send one outreach email from Leads (From should be reed@monroewebdesign.org)
+2. Reply to that email from another account
+3. Check app  Inbox  — reply should appear
+4. Check Gmail — forward copy should arrive
+
+Health check (after deploy):
+  https://webdesign-app.onrender.com/api/health
+  SENDGRID_FROM_EMAIL should be true

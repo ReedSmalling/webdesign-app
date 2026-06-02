@@ -27,12 +27,19 @@ const checkDailyLimit = async (type) => {
     : (settings?.daily_sms_limit ?? DEFAULT_LIMITS.daily_sms_limit);
 
   const today = new Date().toISOString().split('T')[0];
-  const { count, error } = await supabase
+  let query = supabase
     .from('outreach_log')
     .select('*', { count: 'exact', head: true })
-    .eq('type', type)
+    .eq('status', 'sent')
     .gte('sent_at', today);
 
+  if (type === 'email') {
+    query = query.in('type', ['email', 'email_followup']);
+  } else {
+    query = query.eq('type', 'sms');
+  }
+
+  const { count, error } = await query;
   if (error) throw error;
   return (count ?? 0) < limit;
 };

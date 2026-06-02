@@ -2,6 +2,34 @@ import { useEffect, useState } from 'react';
 import { api } from '../api';
 import LeadCard from '../components/LeadCard';
 
+const BUSINESS_TYPES = [
+  { value: 'restaurant', label: 'Restaurant' },
+  { value: 'salon', label: 'Salon' },
+  { value: 'plumber', label: 'Plumber' },
+  { value: 'landscaping', label: 'Landscaping' },
+  { value: 'dentist', label: 'Dentist' },
+  { value: 'auto repair', label: 'Auto Repair' },
+  { value: 'gym', label: 'Gym' },
+  { value: 'lawyer', label: 'Lawyer' },
+  { value: 'roofer', label: 'Roofer' },
+  { value: 'electrician', label: 'Electrician' },
+  { value: 'hvac', label: 'HVAC' },
+  { value: 'contractor', label: 'Contractor' },
+  { value: 'bakery', label: 'Bakery' },
+  { value: 'coffee shop', label: 'Coffee Shop' },
+  { value: 'real estate agent', label: 'Real Estate Agent' },
+  { value: 'chiropractor', label: 'Chiropractor' },
+  { value: 'veterinarian', label: 'Veterinarian' },
+  { value: 'cleaning service', label: 'Cleaning Service' },
+  { value: 'photographer', label: 'Photographer' },
+  { value: 'barber shop', label: 'Barber Shop' },
+  { value: 'nail salon', label: 'Nail Salon' },
+  { value: 'pest control', label: 'Pest Control' },
+  { value: 'moving company', label: 'Moving Company' },
+  { value: 'tire shop', label: 'Tire Shop' },
+  { value: 'florist', label: 'Florist' },
+];
+
 export default function Leads() {
   const [leads, setLeads] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -99,13 +127,11 @@ export default function Leads() {
             onChange={(e) => setFindForm({ ...findForm, businessType: e.target.value })}
             className="rounded-lg border border-slate-300 px-4 py-2 text-sm focus:border-brand-500 focus:outline-none"
           >
-            <option value="restaurant">Restaurant</option>
-            <option value="salon">Salon</option>
-            <option value="plumber">Plumber</option>
-            <option value="dentist">Dentist</option>
-            <option value="auto repair">Auto Repair</option>
-            <option value="gym">Gym</option>
-            <option value="lawyer">Lawyer</option>
+            {BUSINESS_TYPES.map(({ value, label }) => (
+              <option key={value} value={value}>
+                {label}
+              </option>
+            ))}
           </select>
           <button
             type="submit"
