@@ -1,4 +1,5 @@
-const typeIcons = { email: '✉️', sms: '📱' };
+const typeIcons = { email: '✉️', sms: '📱', email_followup: '🔁' };
+const typeLabels = { email: 'Email', sms: 'SMS', email_followup: 'Follow-up' };
 const statusColors = {
   sent: 'text-green-600',
   opened: 'text-blue-600',
@@ -31,7 +32,9 @@ export default function OutreachLog({ logs = [], loading }) {
       <div className="divide-y divide-slate-100 max-h-96 overflow-y-auto">
         {logs.map((log) => (
           <div key={log.id} className="flex items-start gap-4 px-5 py-4 hover:bg-slate-50">
-            <span className="text-xl">{typeIcons[log.type] || '📋'}</span>
+            <span className="text-xl" title={typeLabels[log.type] || log.type}>
+              {typeIcons[log.type] || '📋'}
+            </span>
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-2">
                 <span className="font-medium text-slate-900">

@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const { generateEmail, generateSMS } = require('../services/claude');
+const { generateEmail, generateFollowUpEmail, generateSMS } = require('../services/claude');
 const { sendEmail } = require('../services/sendgrid');
 const { sendSMS } = require('../services/twilio');
 const { createClient } = require('@supabase/supabase-js');
@@ -109,6 +109,133 @@ router.get('/log', async (req, res) => {
     .limit(100);
   if (error) return res.status(500).json({ error: error.message });
   res.json(data);
+});
+
+const getEligibleFollowUpLeads = async () => {
+  const threeDaysAgo = new Date();
+  threeDaysAgo.setDate(threeDaysAgo.getDate() - 3);
+
+  const { data: emailLogs, error: logError } = await supabase
+    .from('outreach_log')
+    .select('lead_id, sent_at')
+    .eq('type', 'email')
+    .eq('status', 'sent')
+    .order('sent_at', { ascending: true });
+
+  if (logError) throw logError;
+
+  const firstEmailByLead = {};
+  for (const log of emailLogs || []) {
+    if (!firstEmailByLead[log.lead_id]) {
+      firstEmailByLead[log.lead_id] = log.sent_at;
+    }
+  }
+
+  const eligibleLeadIds = Object.entries(firstEmailByLead)
+    .filter(([, sentAt]) => new Date(sentAt) <= threeDaysAgo)
+    .map(([id]) => id);
+
+  if (!eligibleLeadIds.length) return [];
+
+  const { data: followUpLogs, error: followUpError } = await supabase
+    .from('outreach_log')
+    .select('lead_id')
+    .eq('type', 'email_followup')
+    .in('lead_id', eligibleLeadIds);
+
+  if (followUpError) throw followUpError;
+
+  const alreadyFollowedUp = new Set((followUpLogs || []).map((l) => l.lead_id));
+
+  const { data: inboxReplies, error: inboxError } = await supabase
+    .from('inbox')
+    .select('lead_id')
+    .in('lead_id', eligibleLeadIds);
+
+  if (inboxError) throw inboxError;
+
+  const repliedLeadIds = new Set((inboxReplies || []).map((i) => i.lead_id));
+
+  const { data: leads, error: leadsError } = await supabase
+    .from('leads')
+    .select('*')
+    .in('id', eligibleLeadIds)
+    .eq('status', 'contacted')
+    .not('email', 'is', null)
+    .neq('email', '');
+
+  if (leadsError) throw leadsError;
+
+  return (leads || []).filter(
+    (lead) => !alreadyFollowedUp.has(lead.id) && !repliedLeadIds.has(lead.id)
+  );
+};
+
+router.get('/follow-ups/preview', async (req, res) => {
+  try {
+    const leads = await getEligibleFollowUpLeads();
+    res.json({
+      eligible: leads.length,
+      leads: leads.map((l) => ({ id: l.id, business_name: l.business_name, city: l.city })),
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.post('/follow-ups', async (req, res) => {
+  try {
+    const leads = await getEligibleFollowUpLeads();
+
+    if (!leads.length) {
+      return res.json({
+        success: true,
+        sent: 0,
+        failed: 0,
+        message: 'No leads need a follow-up right now. Follow-ups go to contacted leads emailed 3+ days ago with no reply.',
+      });
+    }
+
+    const results = [];
+    let sent = 0;
+    let failed = 0;
+
+    for (const lead of leads) {
+      try {
+        const allowed = await checkDailyLimit('email');
+        if (!allowed) {
+          results.push({ id: lead.id, business_name: lead.business_name, status: 'limit_reached' });
+          break;
+        }
+
+        const emailContent = await generateFollowUpEmail(lead);
+        const subject = emailContent.match(/Subject: (.+)/)?.[1] || 'Quick follow-up on your website';
+        const body = emailContent.replace(/Subject: .+\n?/, '').trim();
+        await sendEmail(lead.email, subject, body);
+        await supabase.from('outreach_log').insert({
+          lead_id: lead.id,
+          type: 'email_followup',
+          message: emailContent,
+          status: 'sent',
+        });
+        results.push({ id: lead.id, business_name: lead.business_name, status: 'sent' });
+        sent += 1;
+      } catch (err) {
+        results.push({
+          id: lead.id,
+          business_name: lead.business_name,
+          status: 'failed',
+          error: err.message,
+        });
+        failed += 1;
+      }
+    }
+
+    res.json({ success: true, results, sent, failed });
+  } catch (err) {
+    console.error('Follow-up send error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
 });
 
 router.post('/bulk', async (req, res) => {

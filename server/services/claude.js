@@ -62,6 +62,25 @@ const generateEmail = async (lead) => {
   return message.content[0].text;
 };
 
+const generateFollowUpEmail = async (lead) => {
+  const message = await client.messages.create({
+    model: MODEL,
+    max_tokens: 500,
+    messages: [{
+      role: 'user',
+      content: `Write a short friendly follow-up email for a local business we emailed about a week ago with no reply.
+        Business: ${lead.business_name}
+        Type: ${lead.business_type}
+        City: ${lead.city}
+        Owner: ${lead.owner_name || 'there'}
+        Include subject line starting with "Subject: "
+        Keep under 80 words. Gently reference our previous note about a professional website.
+        Warm and casual, not salesy. End with one simple question. No placeholders.`
+    }]
+  });
+  return message.content[0].text;
+};
+
 const generateSMS = async (lead) => {
   const message = await client.messages.create({
     model: MODEL,
@@ -102,4 +121,11 @@ const generateWebsite = async (businessInfo) => {
   return extractHtml(message.content[0].text);
 };
 
-module.exports = { generateEmail, generateSMS, generateWebsite, extractHtml, ensurePreviewHtml };
+module.exports = {
+  generateEmail,
+  generateFollowUpEmail,
+  generateSMS,
+  generateWebsite,
+  extractHtml,
+  ensurePreviewHtml,
+};

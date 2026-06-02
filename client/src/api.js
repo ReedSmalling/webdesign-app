@@ -1,4 +1,5 @@
-const API = process.env.REACT_APP_API_URL || '';
+export const API_BASE = process.env.REACT_APP_API_URL || '';
+const API = API_BASE;
 
 async function request(path, options = {}) {
   let res;
@@ -8,7 +9,11 @@ async function request(path, options = {}) {
       ...options,
     });
   } catch {
-    throw new Error('Could not reach the server. Make sure the backend is running on port 5000.');
+    throw new Error(
+      API
+        ? 'Could not reach the server. The backend may be waking up — wait a minute and try again.'
+        : 'Could not reach the server. Make sure the backend is running on port 5000.'
+    );
   }
 
   const text = await res.text();
@@ -55,6 +60,8 @@ export const api = {
       request(`/api/outreach/send/${leadId}`, { method: 'POST', body: JSON.stringify({ type }) }),
     bulk: (body) =>
       request('/api/outreach/bulk', { method: 'POST', body: JSON.stringify(body) }),
+    followUpsPreview: () => request('/api/outreach/follow-ups/preview'),
+    sendFollowUps: () => request('/api/outreach/follow-ups', { method: 'POST' }),
     log: () => request('/api/outreach/log'),
   },
   inbox: {

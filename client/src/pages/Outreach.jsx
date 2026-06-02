@@ -7,6 +7,8 @@ export default function Outreach() {
   const [loading, setLoading] = useState(true);
   const [bulkForm, setBulkForm] = useState({ type: 'email', city: '', businessType: '' });
   const [sending, setSending] = useState(false);
+  const [sendingFollowUps, setSendingFollowUps] = useState(false);
+  const [eligibleFollowUps, setEligibleFollowUps] = useState(0);
   const [message, setMessage] = useState('');
 
   const loadLogs = async () => {
@@ -21,9 +23,42 @@ export default function Outreach() {
     }
   };
 
+  const loadFollowUpPreview = async () => {
+    try {
+      const data = await api.outreach.followUpsPreview();
+      setEligibleFollowUps(data.eligible ?? 0);
+    } catch {
+      setEligibleFollowUps(0);
+    }
+  };
+
   useEffect(() => {
     loadLogs();
+    loadFollowUpPreview();
   }, []);
+
+  const handleFollowUps = async () => {
+    setSendingFollowUps(true);
+    setMessage('');
+    try {
+      const result = await api.outreach.sendFollowUps();
+      const sent = result.sent ?? 0;
+      const failed = result.failed ?? 0;
+      if (sent === 0 && result.message) {
+        setMessage(result.message);
+      } else {
+        setMessage(
+          `Follow-ups complete: ${sent} sent${failed ? `, ${failed} failed` : ''}`
+        );
+      }
+      loadLogs();
+      loadFollowUpPreview();
+    } catch (err) {
+      setMessage(err.message);
+    } finally {
+      setSendingFollowUps(false);
+    }
+  };
 
   const handleBulk = async (e) => {
     e.preventDefault();
@@ -41,6 +76,7 @@ export default function Outreach() {
         );
       }
       loadLogs();
+      loadFollowUpPreview();
     } catch (err) {
       setMessage(err.message);
     } finally {
@@ -92,6 +128,24 @@ export default function Outreach() {
           </button>
         </div>
       </form>
+
+      <div className="mb-6 rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
+        <h2 className="mb-2 font-semibold text-slate-900">Email Follow-ups</h2>
+        <p className="mb-4 text-sm text-slate-500">
+          Sends a short friendly follow-up to leads you emailed 3+ days ago who never replied.
+          Each lead gets one follow-up only. Respects daily email limits from Settings.
+        </p>
+        <button
+          type="button"
+          onClick={handleFollowUps}
+          disabled={sendingFollowUps || eligibleFollowUps === 0}
+          className="rounded-lg bg-slate-800 px-6 py-2 text-sm font-medium text-white hover:bg-slate-900 disabled:opacity-50"
+        >
+          {sendingFollowUps
+            ? 'Sending follow-ups...'
+            : `Send Follow-ups${eligibleFollowUps ? ` (${eligibleFollowUps})` : ''}`}
+        </button>
+      </div>
 
       {message && (
         <div className="mb-4 rounded-lg bg-green-50 px-4 py-3 text-sm text-green-800">{message}</div>
