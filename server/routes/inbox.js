@@ -82,6 +82,8 @@ router.post('/webhook/email', upload.none(), async (req, res) => {
     }
 
     res.sendStatus(200);
+  } catch (err) {
+    console.error('Inbound email webhook error:', err);
     res.sendStatus(500);
   }
 });
