@@ -120,24 +120,49 @@ const placeToLead = async (place, city, businessType) => {
 };
 
 const findBusinesses = async (city, businessType) => {
+  if (!process.env.GOOGLE_PLACES_API_KEY?.trim()) {
+    throw new Error(
+      'Google Places API key is missing on the server. In Render open webdesign-app → Environment → paste GOOGLE_PLACES_API_KEY from server/render-env-paste.txt, then redeploy.'
+    );
+  }
+
   const textQuery = `${businessType} in ${city}`;
 
-  const response = await axios.post(
-    'https://places.googleapis.com/v1/places:searchText',
-    {
-      textQuery,
-      maxResultCount: 20,
-      languageCode: 'en',
-    },
-    {
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Goog-Api-Key': process.env.GOOGLE_PLACES_API_KEY,
-        'X-Goog-FieldMask':
-          'places.displayName,places.formattedAddress,places.nationalPhoneNumber,places.websiteUri',
+  let response;
+  try {
+    response = await axios.post(
+      'https://places.googleapis.com/v1/places:searchText',
+      {
+        textQuery,
+        maxResultCount: 20,
+        languageCode: 'en',
       },
+      {
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Goog-Api-Key': process.env.GOOGLE_PLACES_API_KEY.trim(),
+          'X-Goog-FieldMask':
+            'places.displayName,places.formattedAddress,places.nationalPhoneNumber,places.websiteUri',
+        },
+      }
+    );
+  } catch (err) {
+    const status = err.response?.status;
+    const googleMessage =
+      err.response?.data?.error?.message ||
+      err.response?.data?.error_message ||
+      err.message;
+
+    console.error('Google Places API error:', status, googleMessage);
+
+    if (status === 401 || status === 403) {
+      throw new Error(
+        `Google Places API unauthorized (${status}). Enable "Places API (New)" in Google Cloud Console and confirm GOOGLE_PLACES_API_KEY on Render matches your key. Google: ${googleMessage}`
+      );
     }
-  );
+
+    throw new Error(googleMessage || 'Google Places search failed');
+  }
 
   const places = response.data.places || [];
 

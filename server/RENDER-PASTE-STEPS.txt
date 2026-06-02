@@ -1,0 +1,17 @@
+FIX RENDER ENV VARS (3 CLICKS)
+==============================
+
+1. Open in Cursor:  server\render-env-paste.txt
+   Ctrl+A  →  Ctrl+C  (copy all)
+
+2. Browser:  https://dashboard.render.com
+   Click  webdesign-app  →  Environment  →  Edit  →  Raw Editor
+   Paste  →  Save Changes
+
+3. Top right:  Manual Deploy  →  Deploy latest commit
+   Wait for Live (~5 min)
+
+TEST: open in browser
+  https://webdesign-app.onrender.com/api/health
+
+Each env line should show true, especially GOOGLE_PLACES_API_KEY.

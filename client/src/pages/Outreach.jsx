@@ -10,6 +10,7 @@ export default function Outreach() {
   const [sendingFollowUps, setSendingFollowUps] = useState(false);
   const [eligibleFollowUps, setEligibleFollowUps] = useState(0);
   const [message, setMessage] = useState('');
+  const [messageIsError, setMessageIsError] = useState(false);
 
   const loadLogs = async () => {
     setLoading(true);
@@ -40,45 +41,54 @@ export default function Outreach() {
   const handleFollowUps = async () => {
     setSendingFollowUps(true);
     setMessage('');
+    setMessageIsError(false);
     try {
       const result = await api.outreach.sendFollowUps();
-      const sent = result.sent ?? 0;
-      const failed = result.failed ?? 0;
-      if (sent === 0 && result.message) {
-        setMessage(result.message);
-      } else {
-        setMessage(
-          `Follow-ups complete: ${sent} sent${failed ? `, ${failed} failed` : ''}`
-        );
-      }
+      showResultMessage(result, 'Follow-ups complete');
       loadLogs();
       loadFollowUpPreview();
     } catch (err) {
       setMessage(err.message);
+      setMessageIsError(true);
     } finally {
       setSendingFollowUps(false);
     }
+  };
+
+  const showResultMessage = (result, label) => {
+    const sent = result.sent ?? result.results?.filter((r) => r.status === 'sent').length ?? 0;
+    const failed = result.failed ?? result.results?.filter((r) => r.status === 'failed').length ?? 0;
+    const firstError =
+      result.error ||
+      result.results?.find((r) => r.status === 'failed')?.error;
+
+    if (sent === 0 && result.message) {
+      setMessage(result.message);
+      setMessageIsError(failed > 0 || Boolean(firstError));
+      return;
+    }
+
+    let text = `${label}: ${sent} sent${failed ? `, ${failed} failed` : ''}`;
+    if (firstError) {
+      text += `. ${firstError}`;
+    }
+    setMessage(text);
+    setMessageIsError(failed > 0 || Boolean(firstError));
   };
 
   const handleBulk = async (e) => {
     e.preventDefault();
     setSending(true);
     setMessage('');
+    setMessageIsError(false);
     try {
       const result = await api.outreach.bulk(bulkForm);
-      const sent = result.sent ?? result.results.filter((r) => r.status === 'sent').length;
-      const failed = result.failed ?? result.results.filter((r) => r.status === 'failed').length;
-      if (sent === 0 && result.message) {
-        setMessage(result.message);
-      } else {
-        setMessage(
-          `Bulk outreach complete: ${sent} sent${failed ? `, ${failed} failed` : ''}`
-        );
-      }
+      showResultMessage(result, 'Bulk outreach complete');
       loadLogs();
       loadFollowUpPreview();
     } catch (err) {
       setMessage(err.message);
+      setMessageIsError(true);
     } finally {
       setSending(false);
     }
@@ -148,7 +158,15 @@ export default function Outreach() {
       </div>
 
       {message && (
-        <div className="mb-4 rounded-lg bg-green-50 px-4 py-3 text-sm text-green-800">{message}</div>
+        <div
+          className={`mb-4 rounded-lg px-4 py-3 text-sm ${
+            messageIsError
+              ? 'bg-red-50 text-red-800'
+              : 'bg-green-50 text-green-800'
+          }`}
+        >
+          {message}
+        </div>
       )}
 
       <OutreachLog logs={logs} loading={loading} />

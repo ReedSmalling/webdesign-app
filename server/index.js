@@ -6,8 +6,20 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
+const ENV_KEYS = [
+  'SUPABASE_URL',
+  'SUPABASE_ANON_KEY',
+  'GOOGLE_PLACES_API_KEY',
+  'ANTHROPIC_API_KEY',
+  'SENDGRID_API_KEY',
+  'SENDGRID_FROM_EMAIL',
+];
+
 app.get('/api/health', (req, res) => {
-  res.json({ ok: true, version: '2026-06-01-claude-4-5' });
+  const env = Object.fromEntries(
+    ENV_KEYS.map((key) => [key, Boolean(process.env[key]?.trim())])
+  );
+  res.json({ ok: true, version: '2026-06-03-places-sendgrid', env });
 });
 
 app.use('/api/leads', require('./routes/leads'));

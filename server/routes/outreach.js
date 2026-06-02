@@ -1,11 +1,22 @@
 const express = require('express');
 const router = express.Router();
 const { generateEmail, generateFollowUpEmail, generateSMS } = require('../services/claude');
-const { sendEmail } = require('../services/sendgrid');
+const { sendEmail, isSenderConfigError } = require('../services/sendgrid');
 const { sendSMS } = require('../services/twilio');
 const { createClient } = require('@supabase/supabase-js');
 
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_ANON_KEY);
+
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+const logFailedOutreach = async (leadId, type, message, errorMessage) => {
+  await supabase.from('outreach_log').insert({
+    lead_id: leadId,
+    type,
+    message: errorMessage ? `${message}\n\nError: ${errorMessage}` : message,
+    status: 'failed',
+  });
+};
 
 const DEFAULT_LIMITS = { daily_email_limit: 100, daily_sms_limit: 100 };
 
@@ -280,6 +291,10 @@ router.post('/bulk', async (req, res) => {
   for (const lead of leads) {
     try {
       if (type === 'email') {
+        if (!EMAIL_REGEX.test(lead.email)) {
+          throw new Error(`Invalid email address: ${lead.email}`);
+        }
+
         const allowed = await checkDailyLimit('email');
         if (!allowed) {
           results.push({ id: lead.id, business_name: lead.business_name, status: 'limit_reached' });
@@ -321,6 +336,10 @@ router.post('/bulk', async (req, res) => {
         sent += 1;
       }
     } catch (err) {
+      console.error(`Bulk outreach failed for ${lead.business_name} (${lead.email}):`, err.message);
+      if (type === 'email') {
+        await logFailedOutreach(lead.id, 'email', 'Bulk email failed', err.message);
+      }
       results.push({
         id: lead.id,
         business_name: lead.business_name,
@@ -328,10 +347,21 @@ router.post('/bulk', async (req, res) => {
         error: err.message,
       });
       failed += 1;
+      if (err.isSenderConfigError || isSenderConfigError(err.message)) {
+        break;
+      }
     }
   }
 
-  res.json({ success: true, results, sent, failed });
+  const configError = results.find((r) => r.status === 'failed' && isSenderConfigError(r.error || ''))?.error;
+
+  res.json({
+    success: true,
+    results,
+    sent,
+    failed,
+    ...(configError ? { error: configError } : {}),
+  });
 });
 
 module.exports = router;
