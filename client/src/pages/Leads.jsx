@@ -40,6 +40,7 @@ export default function Leads() {
   const [message, setMessage] = useState('');
   const [feedback, setFeedback] = useState(null);
   const [sendingId, setSendingId] = useState(null);
+  const [savingId, setSavingId] = useState(null);
 
   const fetchLeads = async ({ showLoading = true } = {}) => {
     if (showLoading) setLoading(true);
@@ -67,13 +68,33 @@ export default function Leads() {
     try {
       const result = await api.leads.find(findForm.city, findForm.businessType);
       setMessage(
-        `Found ${result.count} businesses without websites. ${result.inserted ?? result.count} new leads added.`
+        `Found ${result.count} businesses without a real website (${result.skippedWithWebsite ?? 0} skipped — already had a site). ${result.inserted ?? 0} new leads added.`
       );
       fetchLeads();
     } catch (err) {
       setMessage(err.message || 'Search failed');
     } finally {
       setFinding(false);
+    }
+  };
+
+  const updateContact = async (lead, { email, phone }) => {
+    setSavingId(lead.id);
+    setFeedback(null);
+    try {
+      await api.leads.update(lead.id, { email, phone });
+      setFeedback({
+        type: 'success',
+        text: `Contact info updated for ${lead.business_name}.`,
+      });
+      await fetchLeads({ showLoading: false });
+    } catch (err) {
+      setFeedback({
+        type: 'error',
+        text: err.message || 'Failed to save contact info.',
+      });
+    } finally {
+      setSavingId(null);
     }
   };
 
@@ -194,6 +215,8 @@ export default function Leads() {
               key={lead.id}
               lead={lead}
               sendingId={sendingId}
+              savingId={savingId}
+              onUpdateContact={updateContact}
               onSendEmail={(l) => sendOutreach(l, 'email')}
               onSendSMS={(l) => sendOutreach(l, 'sms')}
               onSendBoth={(l) => sendOutreach(l, 'both')}

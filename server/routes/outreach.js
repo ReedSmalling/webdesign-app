@@ -41,7 +41,8 @@ const checkDailyLimit = async (type) => {
 
   const { count, error } = await query;
   if (error) throw error;
-  return (count ?? 0) < limit;
+  const used = count ?? 0;
+  return { allowed: used < limit, used, limit };
 };
 
 router.post('/send/:leadId', async (req, res) => {
@@ -70,8 +71,12 @@ router.post('/send/:leadId', async (req, res) => {
     const results = {};
 
     if ((type === 'email' || type === 'both') && lead.email) {
-      const allowed = await checkDailyLimit('email');
-      if (!allowed) return res.status(429).json({ error: 'Daily email limit reached' });
+      const emailLimit = await checkDailyLimit('email');
+      if (!emailLimit.allowed) {
+        return res.status(429).json({
+          error: `Daily email limit reached (${emailLimit.used}/${emailLimit.limit} sent today). Increase the limit in Settings or try again tomorrow.`,
+        });
+      }
 
       const emailContent = await generateEmail(lead);
       const subject = emailContent.match(/Subject: (.+)/)?.[1] || 'Professional Website for Your Business';
@@ -87,8 +92,12 @@ router.post('/send/:leadId', async (req, res) => {
     }
 
     if ((type === 'sms' || type === 'both') && lead.phone) {
-      const allowed = await checkDailyLimit('sms');
-      if (!allowed) return res.status(429).json({ error: 'Daily SMS limit reached' });
+      const smsLimit = await checkDailyLimit('sms');
+      if (!smsLimit.allowed) {
+        return res.status(429).json({
+          error: `Daily SMS limit reached (${smsLimit.used}/${smsLimit.limit} sent today). Increase the limit in Settings or try again tomorrow.`,
+        });
+      }
 
       const smsContent = await generateSMS(lead);
       const twilioResult = await sendSMS(lead.phone, smsContent);
@@ -220,9 +229,14 @@ router.post('/follow-ups', async (req, res) => {
 
     for (const lead of leads) {
       try {
-        const allowed = await checkDailyLimit('email');
-        if (!allowed) {
-          results.push({ id: lead.id, business_name: lead.business_name, status: 'limit_reached' });
+        const emailLimit = await checkDailyLimit('email');
+        if (!emailLimit.allowed) {
+          results.push({
+            id: lead.id,
+            business_name: lead.business_name,
+            status: 'limit_reached',
+            error: `Daily email limit reached (${emailLimit.used}/${emailLimit.limit} sent today).`,
+          });
           break;
         }
 
@@ -302,9 +316,14 @@ router.post('/bulk', async (req, res) => {
           throw new Error(`Invalid email address: ${lead.email}`);
         }
 
-        const allowed = await checkDailyLimit('email');
-        if (!allowed) {
-          results.push({ id: lead.id, business_name: lead.business_name, status: 'limit_reached' });
+        const emailLimit = await checkDailyLimit('email');
+        if (!emailLimit.allowed) {
+          results.push({
+            id: lead.id,
+            business_name: lead.business_name,
+            status: 'limit_reached',
+            error: `Daily email limit reached (${emailLimit.used}/${emailLimit.limit} sent today).`,
+          });
           break;
         }
 
@@ -324,9 +343,14 @@ router.post('/bulk', async (req, res) => {
       }
 
       if (type === 'sms') {
-        const allowed = await checkDailyLimit('sms');
-        if (!allowed) {
-          results.push({ id: lead.id, business_name: lead.business_name, status: 'limit_reached' });
+        const smsLimit = await checkDailyLimit('sms');
+        if (!smsLimit.allowed) {
+          results.push({
+            id: lead.id,
+            business_name: lead.business_name,
+            status: 'limit_reached',
+            error: `Daily SMS limit reached (${smsLimit.used}/${smsLimit.limit} sent today).`,
+          });
           break;
         }
 

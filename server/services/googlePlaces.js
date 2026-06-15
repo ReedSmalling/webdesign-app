@@ -52,6 +52,35 @@ const fetchPageHtml = async (url) => {
   return response.data;
 };
 
+const DIRECTORY_HOSTS = [
+  'facebook.com',
+  'fb.com',
+  'instagram.com',
+  'yelp.com',
+  'linktr.ee',
+  'twitter.com',
+  'x.com',
+  'tiktok.com',
+  'google.com',
+  'maps.app.goo.gl',
+  'yellowpages.com',
+  'bbb.org',
+  'tripadvisor.com',
+  'square.site',
+  'wixsite.com',
+  'godaddysites.com',
+];
+
+const hasRealWebsite = (websiteUrl) => {
+  if (!websiteUrl) return false;
+  try {
+    const host = new URL(websiteUrl).hostname.replace(/^www\./, '').toLowerCase();
+    return !DIRECTORY_HOSTS.some((domain) => host === domain || host.endsWith(`.${domain}`));
+  } catch {
+    return false;
+  }
+};
+
 const buildCandidateUrls = (websiteUrl) => {
   const parsed = new URL(websiteUrl);
   const origin = parsed.origin;
@@ -95,25 +124,17 @@ const mapWithLimit = async (items, limit, mapper) => {
 
 const placeToLead = async (place, city, businessType) => {
   const websiteUrl = place.websiteUri || null;
-  let email = null;
-
-  if (websiteUrl) {
-    try {
-      email = await scrapeEmailsFromWebsite(websiteUrl);
-    } catch (err) {
-      console.warn(`Email scrape failed for ${websiteUrl}:`, err.message);
-    }
-  }
-
-  const notes = [place.formattedAddress, websiteUrl].filter(Boolean).join(' | ');
+  const notes = [place.formattedAddress, websiteUrl && !hasRealWebsite(websiteUrl) ? `Listing: ${websiteUrl}` : null]
+    .filter(Boolean)
+    .join(' | ');
 
   return {
     business_name: place.displayName?.text || 'Unknown Business',
     city,
     business_type: businessType,
     phone: place.nationalPhoneNumber || null,
-    email,
-    has_website: !!websiteUrl,
+    email: null,
+    has_website: hasRealWebsite(websiteUrl),
     source: 'google_places',
     notes: notes || null,
   };
@@ -165,12 +186,17 @@ const findBusinesses = async (city, businessType) => {
   }
 
   const places = response.data.places || [];
+  const prospects = places.filter((place) => !hasRealWebsite(place.websiteUri));
 
-  const leads = await mapWithLimit(places, 5, (place) =>
+  const leads = await mapWithLimit(prospects, 5, (place) =>
     placeToLead(place, city, businessType)
   );
 
-  return leads.filter((lead) => !lead.has_website || lead.email);
+  return {
+    leads,
+    skippedWithWebsite: places.length - prospects.length,
+    placesChecked: places.length,
+  };
 };
 
 module.exports = {

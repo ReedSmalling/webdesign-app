@@ -8,7 +8,7 @@ const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_ANO
 router.post('/find', async (req, res) => {
   const { city, businessType } = req.body;
   try {
-    const leads = await findBusinesses(city, businessType);
+    const { leads, skippedWithWebsite } = await findBusinesses(city, businessType);
     const emailsFound = leads.filter((lead) => lead.email).length;
 
     const { data: existingLeads, error: fetchError } = await supabase
@@ -34,6 +34,7 @@ router.post('/find', async (req, res) => {
       count: leads.length,
       inserted: newLeads.length,
       emailsFound,
+      skippedWithWebsite,
       leads,
     });
   } catch (err) {

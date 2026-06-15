@@ -15,12 +15,21 @@ const sendSMS = async (to, message) => {
   const normalizedTo = normalizePhone(to);
   if (!normalizedTo) throw new Error('Invalid phone number');
 
-  const result = await client.messages.create({
+  const messagingServiceSid = process.env.TWILIO_MESSAGING_SERVICE_SID?.trim();
+  const payload = {
     body: message,
-    from: process.env.TWILIO_PHONE_NUMBER,
     to: normalizedTo,
     statusCallback: process.env.TWILIO_STATUS_CALLBACK_URL || undefined,
-  });
+  };
+
+  // A2P 10DLC requires sending via the approved Messaging Service, not directly from the number.
+  if (messagingServiceSid) {
+    payload.messagingServiceSid = messagingServiceSid;
+  } else {
+    payload.from = process.env.TWILIO_PHONE_NUMBER;
+  }
+
+  const result = await client.messages.create(payload);
 
   return {
     success: true,
